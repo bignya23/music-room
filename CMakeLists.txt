@@ -17,7 +17,7 @@ if (NOT Boost_FOUND)
 endif()
 
 # ——— Prepare our target ———
-add_executable(MyBoostAsioApp
+add_executable(music_room
   music-room.cpp
   src/client.cpp
   src/server.cpp
@@ -27,19 +27,19 @@ add_executable(MyBoostAsioApp
 )
 
 # ——— Include directories ———
-target_include_directories(MyBoostAsioApp
+target_include_directories(music_room
   PUBLIC
     ${Boost_INCLUDE_DIRS}          # <boost/...>
     ${CMAKE_SOURCE_DIR}/src/headers  # for .hpp files
 )
 
-target_include_directories(MyBoostAsioApp
+target_include_directories(music_room
   PUBLIC
     ${BOOST_ROOT}                  # for Beast, Asio, etc.
 )
 
 # ——— Link libraries ———
-target_link_libraries(MyBoostAsioApp
+target_link_libraries(music_room
   PRIVATE
     ${Boost_LIBRARIES}
 )
