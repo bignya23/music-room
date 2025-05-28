@@ -1,7 +1,3 @@
-#include <iostream>
-#include <mutex>
-#include <queue>
-#include <memory>
 #include "headers/server.hpp"
 
 RoomServer::RoomServer(boost::asio::io_context& ioc, unsigned short port)
@@ -20,6 +16,8 @@ void RoomServer::do_accept() {
                 if (!ec) {
                     {
                         std::lock_guard<std::mutex> lock(clients_mutex_);
+                        client_ids_[ws] = next_client_no_;
+                        next_client_no_++;
                         clients_.insert(ws);
                         client_queues_[ws] = std::make_shared<ClientMessageQueue>();
                         std::cout << "New client joined! No of clients : " << clients_.size() << std::endl;
@@ -42,24 +40,61 @@ void RoomServer::handle_client(std::shared_ptr<websocket::stream<tcp::socket>> w
 
             std::cout << "Message from client: " << msg << std::endl;
             // send message to all clients
-            broadcast_message(msg, ws);
+            parse_message(msg, ws);
 
             handle_client(ws);
         }
         else {
             std::cout << "Client disconnected. Error: " << ec.message() << std::endl;
-            remove_client(ws); // Use remove_client instead of direct erase
+            remove_client(ws); 
         }
         });
 }
 
+void RoomServer::parse_message(const std::string& message, std::shared_ptr < websocket::stream <tcp::socket>> sender) {
+
+    try {
+        auto j = json::parse(message);
+
+        std::string type = j["type"];
+
+        if (type == "join") {
+            std::string room_id = j["room"];
+            {
+                std::lock_guard<std::mutex> lock(rooms_mutex_);
+                std::string message = room_manager_.joinRoom(room_id, sender);
+                queue_message_for_client(sender, message);
+                std::cout << message;
+            }
+        }
+        else if (type == "create") {
+            std::string room_id = j["room"];
+            {
+                std::lock_guard<std::mutex> lock(rooms_mutex_);
+                std::string message = room_manager_.createRoom(room_id, sender);
+                queue_message_for_client(sender, message);
+                std::cout << message;
+            }
+        }
+        else {
+            broadcast_message(message, sender);
+        }
+    }
+    catch (const std::exception& e) {
+        broadcast_message(message, sender);
+    }
+}
+
+
 void RoomServer::broadcast_message(const std::string& message, std::shared_ptr<websocket::stream<tcp::socket>> sender) {
+
     std::vector<std::shared_ptr<websocket::stream<tcp::socket>>> clients_to_send;
 
     {
-        std::lock_guard<std::mutex> lock(clients_mutex_);
-        clients_to_send.reserve(clients_.size());
-        for (const auto& client : clients_) {
+        std::lock_guard<std::mutex> lock(rooms_mutex_);
+        std::string room_id = room_manager_.getClientRoom(sender);
+        std::vector<std::shared_ptr<websocket::stream<tcp::socket>>> clients = room_manager_.getRoomClients(room_id);
+        for (const auto& client : clients) {
             if (client != sender) {
                 clients_to_send.push_back(client);
             }
@@ -88,7 +123,6 @@ void RoomServer::queue_message_for_client(std::shared_ptr<websocket::stream<tcp:
     queue->messages.push(message);
 
     if (is_empty) {
-        // Post to io_context to avoid potential issues with calling from different threads
         boost::asio::post(io_context_, [this, client, queue]() {
             send_next_message(client, queue);
             });

@@ -11,6 +11,8 @@ set(BOOST_ROOT "C:/Libraries/boost_1_88_0")
 set(BOOST_LIBRARYDIR "${BOOST_ROOT}/stage/lib")
 set(Boost_USE_STATIC_LIBS ON)
 
+
+
 find_package(Boost REQUIRED COMPONENTS system thread)
 if (NOT Boost_FOUND)
   message(FATAL_ERROR "Boost not found in ${BOOST_ROOT}")
@@ -23,8 +25,7 @@ add_executable(music_room
   src/server.cpp
   src/vote.cpp
   src/music.cpp
-  
-)
+ "src/rooms.cpp")
 
 # ——— Include directories ———
 target_include_directories(music_room
