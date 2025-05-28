@@ -76,6 +76,20 @@ void RoomServer::parse_message(const std::string& message, std::shared_ptr < web
                 std::cout << message;
             }
         }
+        else if (j["type"] == "music_chunk") {
+            std::string room_id = room_manager_.getClientRoom(sender);
+            auto clients = room_manager_.getRoomClients(room_id);
+
+            for (auto& client : clients) {
+                if (client != sender) { // Not sending back to sender
+                    json music_msg = {
+                        {"type", "music_chunk"},
+                        {"data", j["data"]}
+                    };
+                    queue_message_for_client(sender, music_msg.dump());
+                }
+            }
+        }
         else {
             broadcast_message(message, sender);
         }

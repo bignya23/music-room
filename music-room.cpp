@@ -3,6 +3,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include "src/headers/music.hpp"
 
 int main() {
     int mode;
@@ -58,14 +59,20 @@ int main() {
 
             while (true) {
                 std::string msg;
+                std::cout << "Enter Message : ";
                 std::getline(std::cin, msg);
 
-                if (msg.empty()) {
-                    std::cout << "Disconnecting..." << std::endl;
-                    break;
+                if (msg == "/dj") {
+                    std::string filePath;
+                    std::cout << "Enter path to MP3: ";
+                    std::getline(std::cin, filePath);
+                    music::streamAudioFile(filePath, [&](const std::string& chunk) {
+                        client.sendAudioChunk(chunk);
+                    });
                 }
-
-                client.send(msg);
+                else {
+                    client.sendTextMessage(msg); 
+                }
             }
         }
         catch (const std::exception& e) {

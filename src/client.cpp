@@ -1,5 +1,6 @@
 #include "headers/client.hpp"
 #include <iostream>
+#include "headers/music.hpp"
 
 
 using tcp = boost::asio::ip::tcp;
@@ -40,19 +41,41 @@ void RoomClient::send(const std::string& message) {
 
 // Reading messages from the server 
 void RoomClient::do_read() {
+
 	ws_.async_read(buffer_, [this](boost::system::error_code ec, std::size_t bytes_transferred) {
 		if (!ec) {
 			auto data = buffer_.data();
-			std::string recieved = boost::beast::buffers_to_string(data);
-			std::cout << "Recieved from server : " << recieved << std::endl;
+			std::string received = boost::beast::buffers_to_string(data);
 			buffer_.consume(bytes_transferred);
-			do_read();
+
+			try {
+				auto j = json::parse(received);
+				std::string type = j.value("type", "");
+
+				if (type == "audio") {
+					std::string base64Chunk = j.value("data", "");
+					music::handleAudioChunk(base64Chunk);  
+				}
+				else if (type == "text") {
+					std::string msg = j.value("data", "");
+					std::cout << "[Chat] " << msg << std::endl;
+				}
+				else {
+					std::cerr << "[Warning] Unknown message type: " << type << std::endl;
+				}
+			}
+			catch (const std::exception& e) {
+				std::cerr << "[Error] Failed to parse JSON: " << e.what() << "\nRaw: " << received << std::endl;
+			}
+
+			do_read(); // Continue reading
 		}
 		else {
-			std::cerr << "Some error occured while reading. Error : " << ec << std::endl;
+			std::cerr << "Read error: " << ec.message() << std::endl;
 		}
-	});
+		});
 }
+
 
 
 // Writing messages to the server 
@@ -77,4 +100,22 @@ void RoomClient::do_write() {
 			write_queue_ = {};
 		}
 	});
+}
+
+
+void RoomClient::sendTextMessage(const std::string& msg) {
+	nlohmann::json j = {
+		{"type", "text"},
+		{"data", msg}
+	};
+	send(j.dump());
+}
+
+
+void RoomClient::sendAudioChunk(const std::string& base64Chunk) {
+	nlohmann::json j = {
+		{"type", "audio"},
+		{"data", base64Chunk}
+	};
+	send(j.dump());
 }
