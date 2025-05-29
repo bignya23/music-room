@@ -99,13 +99,14 @@ void music::streamAudioFile(const std::string& filepath, std::function<void(cons
         sendCallback(encoded);
 
         // Reduce sleep time for initial buffering
-        {
-            std::lock_guard<std::mutex> lock(g_audioBuffer.mutex);
-            if (g_audioBuffer.chunks.size() < g_audioBuffer.min_buffer_chunks) {
-                // Fast initial fill - check buffer size safely
-            }
+        if (g_audioBuffer.chunks.size() < g_audioBuffer.min_buffer_chunks) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10)); // Fast initial fill
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10)); // Simple delay for streaming
+        else {
+            // Normal streaming delay after initial buffer is filled
+            double chunk_duration = static_cast<double>(file.gcount()) / (44100.0 * 2 * 2) * 1000; // ms
+            std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(chunk_duration * 0.7))); // 70% to maintain buffer
+        }
     }
 
     file.close();
@@ -122,7 +123,7 @@ void music::streamAudioFile(const std::string& filepath, std::function<void(cons
 static PaStream* g_stream = nullptr;
 static bool g_streamInitialized = false;
 
-void music::initializeAudio() {
+void initializeAudio() {
     if (g_streamInitialized) return;
 
     PaError err = Pa_Initialize();
@@ -155,10 +156,9 @@ void music::initializeAudio() {
     }
 
     g_streamInitialized = true;
-    std::cout << "Audio system initialized successfully." << std::endl;
 }
 
-void music::cleanupAudio() {
+void cleanupAudio() {
     if (!g_streamInitialized) return;
 
     // Reset buffer state
@@ -175,7 +175,6 @@ void music::cleanupAudio() {
     Pa_CloseStream(g_stream);
     Pa_Terminate();
     g_streamInitialized = false;
-    std::cout << "Audio system cleaned up." << std::endl;
 }
 
 void music::handleAudioChunk(const std::string& base64Data) {
