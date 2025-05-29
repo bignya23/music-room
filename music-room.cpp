@@ -32,7 +32,7 @@ int main() {
             std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
             std::cout << "Connecting to server..." << std::endl;
-            RoomClient client("127.0.0.1", "9000");
+            RoomClient client("34.59.107.23", "9000");
 
 
             int mode;

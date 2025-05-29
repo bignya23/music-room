@@ -10,6 +10,9 @@
 
 		// Handle received base64-encoded audio chunk and play it
 		void handleAudioChunk(const std::string& base64Chunk);
+		void initializeAudio();
+
+		void cleanupAudio();
 
 	} 
 
