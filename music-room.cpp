@@ -3,6 +3,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include "src/headers/music.hpp"
 
 int main() {
     int mode;
@@ -31,22 +32,47 @@ int main() {
             std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
             std::cout << "Connecting to server..." << std::endl;
-            RoomClient client("127.0.0.1", "9000");
+            RoomClient client("34.59.107.23", "9000");
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-            std::cout << "Connected! Type messages (empty line to quit):" << std::endl;
+            int mode;
+            std::string room_id;
+            std::cout << "Enter mode (create(1)/join(2)): ";
+
+            std::cin >> mode;
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); 
+
+            std::cout << "Enter room id: ";
+
+            std::getline(std::cin, room_id);
+
+
+
+            if (mode == 1) {
+                client.send(R"({"type":"create", "room":")" + room_id + R"("})");
+            }
+            else if (mode == 2) {
+                client.send(R"({"type":"join", "room":")" + room_id + R"("})");
+
+            }
+            std::cout << "Connected!" << std::endl;
 
             while (true) {
                 std::string msg;
+                std::cout << "Enter Message : ";
                 std::getline(std::cin, msg);
 
-                if (msg.empty()) {
-                    std::cout << "Disconnecting..." << std::endl;
-                    break;
+                if (msg == "/dj") {
+                    std::string filePath;
+                    std::cout << "Enter path to MP3: ";
+                    std::getline(std::cin, filePath);
+                    music::streamAudioFile(filePath, [&](const std::string& chunk) {
+                        client.sendAudioChunk(chunk);
+                    });
                 }
-
-                client.send(msg);
+                else {
+                    client.sendTextMessage(msg); 
+                }
             }
         }
         catch (const std::exception& e) {

@@ -4,6 +4,12 @@
 #include <thread>
 #include <string>
 #include <queue>
+//#include <boost/asio/ssl.hpp>
+
+#include <json.hpp>
+
+
+using json = nlohmann::json;
 
 class RoomClient {
 
@@ -12,6 +18,8 @@ public:
 
 	void connect();
 	void send(const std::string& message);
+	void sendTextMessage(const std::string& msg);
+	void sendAudioChunk(const std::string& base64Chunk);
 
 private:
 	void do_read();
@@ -23,6 +31,13 @@ private:
 	boost::beast::flat_buffer buffer_;
 	std::thread io_thread_;
 	std::queue<std::string> write_queue_;
+
+
+	//boost::asio::ssl::context ctx_;
+
+	
+
+
 
 
 };
