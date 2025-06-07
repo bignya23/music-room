@@ -29,7 +29,9 @@ private:
     
     RoomManager room_manager_;  
 
-    std::atomic<int> next_client_no_{ 1 };
+
+    std::unordered_map<std::shared_ptr<websocket::stream<tcp::socket>>, int> client_ids_;
+    int next_client_no_ = 1;
    
     struct ClientMessageQueue {
         std::mutex mtx;
@@ -39,7 +41,6 @@ private:
     std::mutex clients_mutex_;
     std::mutex rooms_mutex_;
     std::unordered_map<std::shared_ptr<websocket::stream<tcp::socket>>, std::shared_ptr<ClientMessageQueue>> client_queues_;
-    std::unordered_map<std::shared_ptr<websocket::stream<tcp::socket>>, int> client_ids_;
 
     void queue_message_for_client(std::shared_ptr<websocket::stream<tcp::socket>> client, const std::string& message);
     void handle_client(std::shared_ptr<websocket::stream<tcp::socket>> ws);

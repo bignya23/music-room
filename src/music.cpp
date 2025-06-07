@@ -1,4 +1,4 @@
-// music.cpp
+
 #include "music.hpp"
 #include <fstream>
 #include <iostream>
@@ -11,16 +11,18 @@
 #include <boost/beast/core/detail/base64.hpp>
 #include <portaudio.h>
 
-constexpr size_t CHUNK_SIZE = 4096;
+constexpr size_t CHUNK_SIZE = 12288;
 
-// Audio buffer management
 struct AudioBuffer {
     std::queue<std::vector<short>> chunks;
     std::mutex mutex;
     bool finished = false;
     bool ready_to_play = false;
-    size_t min_buffer_chunks = 3; // Buffer at least 3 chunks before starting
+    size_t min_buffer_chunks = 5; 
 };
+
+
+
 
 static AudioBuffer g_audioBuffer;
 
@@ -52,7 +54,7 @@ int audioCallback(const void* inputBuffer, void* outputBuffer,
 
     if (!g_audioBuffer.chunks.empty()) {
         auto& chunk = g_audioBuffer.chunks.front();
-        size_t samples_to_copy = std::min(static_cast<size_t>(framesPerBuffer * 2), chunk.size()); // 2 for stereo
+        size_t samples_to_copy = std::min(static_cast<size_t>(framesPerBuffer * 2), chunk.size()); 
 
         std::copy(chunk.begin(), chunk.begin() + samples_to_copy, output);
 
