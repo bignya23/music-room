@@ -8,6 +8,7 @@
 #include <thread>
 #include <json.hpp>
 #include <atomic>
+#include <memory>
 
 using json = nlohmann::json;
 using tcp = boost::asio::ip::tcp;
@@ -15,6 +16,8 @@ namespace websocket = boost::beast::websocket;
 
 class RoomClient {
 public:
+    static constexpr size_t MAX_QUEUE_SIZE = 1000; // Prevent memory issues
+
     RoomClient(const std::string& host, const std::string& port);
     ~RoomClient();
 
@@ -22,6 +25,8 @@ public:
     void sendTextMessage(const std::string& msg);
     void sendAudioChunk(const std::string& base64Chunk);
     void stop();
+
+    std::shared_ptr<RoomClient> shared_from_this();
 
 private:
     void do_read();

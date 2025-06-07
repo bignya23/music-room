@@ -1,5 +1,4 @@
-
-#include "music.hpp"
+#include "headers/music.hpp"
 #include <fstream>
 #include <iostream>
 #include <thread>
@@ -8,23 +7,27 @@
 #include <vector>
 #include <queue>
 #include <mutex>
+#include <atomic>
 #include <boost/beast/core/detail/base64.hpp>
 #include <portaudio.h>
 
-constexpr size_t CHUNK_SIZE = 12288;
+constexpr size_t CHUNK_SIZE = 4096; // Reduced chunk size for better flow control
+constexpr int SAMPLE_RATE = 44100;
+constexpr int CHANNELS = 2;
+constexpr int BYTES_PER_SAMPLE = 2;
 
 struct AudioBuffer {
     std::queue<std::vector<short>> chunks;
     std::mutex mutex;
-    bool finished = false;
-    bool ready_to_play = false;
-    size_t min_buffer_chunks = 5; 
+    std::atomic<bool> finished{ false };
+    std::atomic<bool> ready_to_play{ false };
+    size_t min_buffer_chunks = 3; // Reduced for faster startup
+    size_t max_buffer_chunks = 10; // Prevent excessive buffering
 };
 
-
-
-
 static AudioBuffer g_audioBuffer;
+static PaStream* g_stream = nullptr;
+static std::atomic<bool> g_streamInitialized{ false };
 
 std::string encodeBase64(const std::string& input) {
     namespace b64 = boost::beast::detail::base64;
@@ -46,7 +49,7 @@ int audioCallback(const void* inputBuffer, void* outputBuffer,
 
     // Wait for minimum buffer before starting playback
     if (!g_audioBuffer.ready_to_play && g_audioBuffer.chunks.size() < g_audioBuffer.min_buffer_chunks) {
-        std::fill(output, output + framesPerBuffer * 2, 0);
+        std::fill(output, output + framesPerBuffer * CHANNELS, 0);
         return paContinue;
     }
 
@@ -54,7 +57,7 @@ int audioCallback(const void* inputBuffer, void* outputBuffer,
 
     if (!g_audioBuffer.chunks.empty()) {
         auto& chunk = g_audioBuffer.chunks.front();
-        size_t samples_to_copy = std::min(static_cast<size_t>(framesPerBuffer * 2), chunk.size()); 
+        size_t samples_to_copy = std::min(static_cast<size_t>(framesPerBuffer * CHANNELS), chunk.size());
 
         std::copy(chunk.begin(), chunk.begin() + samples_to_copy, output);
 
@@ -68,18 +71,18 @@ int audioCallback(const void* inputBuffer, void* outputBuffer,
         }
 
         // Fill remaining buffer with silence if needed
-        if (samples_to_copy < framesPerBuffer * 2) {
-            std::fill(output + samples_to_copy, output + framesPerBuffer * 2, 0);
+        if (samples_to_copy < framesPerBuffer * CHANNELS) {
+            std::fill(output + samples_to_copy, output + framesPerBuffer * CHANNELS, 0);
         }
 
         return paContinue;
     }
-    else if (g_audioBuffer.finished) {
+    else if (g_audioBuffer.finished.load()) {
         return paComplete;
     }
     else {
         // No data available, output silence
-        std::fill(output, output + framesPerBuffer * 2, 0);
+        std::fill(output, output + framesPerBuffer * CHANNELS, 0);
         return paContinue;
     }
 }
@@ -95,38 +98,50 @@ void music::streamAudioFile(const std::string& filepath, std::function<void(cons
     file.seekg(44, std::ios::beg);
 
     std::vector<char> buffer(CHUNK_SIZE);
+    size_t chunks_sent = 0;
+
     while (file.read(buffer.data(), CHUNK_SIZE) || file.gcount() > 0) {
         std::string chunk(buffer.data(), file.gcount());
         std::string encoded = encodeBase64(chunk);
-        sendCallback(encoded);
 
-        // Reduce sleep time for initial buffering
-        if (g_audioBuffer.chunks.size() < g_audioBuffer.min_buffer_chunks) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10)); // Fast initial fill
+        try {
+            sendCallback(encoded);
+            chunks_sent++;
+
+            // Calculate proper delay based on audio data rate
+            // Each chunk represents this much audio time
+            double chunk_duration_ms = static_cast<double>(file.gcount()) /
+                (SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE) * 1000.0;
+
+            // Use a more conservative delay to prevent buffer overflow
+            int delay_ms = static_cast<int>(chunk_duration_ms * 0.8); // 80% of real-time
+
+            // Minimum delay to prevent overwhelming the WebSocket
+            delay_ms = std::max(delay_ms, 20); // At least 20ms between chunks
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+
+            // Log progress every 100 chunks
+            if (chunks_sent % 100 == 0) {
+                std::cout << "Sent " << chunks_sent << " audio chunks" << std::endl;
+            }
         }
-        else {
-            // Normal streaming delay after initial buffer is filled
-            double chunk_duration = static_cast<double>(file.gcount()) / (44100.0 * 2 * 2) * 1000; // ms
-            std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(chunk_duration * 0.7))); // 70% to maintain buffer
+        catch (const std::exception& e) {
+            std::cerr << "Error sending audio chunk: " << e.what() << std::endl;
+            break;
         }
     }
 
     file.close();
 
     // Signal that streaming is finished
-    {
-        std::lock_guard<std::mutex> lock(g_audioBuffer.mutex);
-        g_audioBuffer.finished = true;
-    }
+    g_audioBuffer.finished = true;
 
-    std::cout << "Finished streaming WAV." << std::endl;
+    std::cout << "Finished streaming WAV. Total chunks sent: " << chunks_sent << std::endl;
 }
 
-static PaStream* g_stream = nullptr;
-static bool g_streamInitialized = false;
-
 void initializeAudio() {
-    if (g_streamInitialized) return;
+    if (g_streamInitialized.load()) return;
 
     PaError err = Pa_Initialize();
     if (err != paNoError) {
@@ -136,10 +151,10 @@ void initializeAudio() {
 
     err = Pa_OpenDefaultStream(&g_stream,
         0,          // no input channels
-        2,          // stereo output
+        CHANNELS,   // stereo output
         paInt16,    // 16-bit samples
-        44100,      // sample rate
-        128,        // smaller frames per buffer for lower latency
+        SAMPLE_RATE, // sample rate
+        256,        // frames per buffer (increased for stability)
         audioCallback,
         nullptr);   // no callback userData
 
@@ -158,10 +173,11 @@ void initializeAudio() {
     }
 
     g_streamInitialized = true;
+    std::cout << "Audio playback initialized successfully" << std::endl;
 }
 
 void cleanupAudio() {
-    if (!g_streamInitialized) return;
+    if (!g_streamInitialized.load()) return;
 
     // Reset buffer state
     {
@@ -173,34 +189,53 @@ void cleanupAudio() {
         g_audioBuffer.ready_to_play = false;
     }
 
-    Pa_StopStream(g_stream);
-    Pa_CloseStream(g_stream);
+    if (g_stream) {
+        Pa_StopStream(g_stream);
+        Pa_CloseStream(g_stream);
+        g_stream = nullptr;
+    }
     Pa_Terminate();
     g_streamInitialized = false;
+
+    std::cout << "Audio cleanup completed" << std::endl;
 }
 
 void music::handleAudioChunk(const std::string& base64Data) {
-    if (!g_streamInitialized) {
+    if (!g_streamInitialized.load()) {
         initializeAudio();
     }
 
-    std::string decoded;
-    decoded.resize(boost::beast::detail::base64::decoded_size(base64Data.size()));
-    auto result = boost::beast::detail::base64::decode(
-        &decoded[0],
-        base64Data.data(),
-        base64Data.size()
-    );
-    decoded.resize(result.first);
+    try {
+        std::string decoded;
+        decoded.resize(boost::beast::detail::base64::decoded_size(base64Data.size()));
+        auto result = boost::beast::detail::base64::decode(
+            &decoded[0],
+            base64Data.data(),
+            base64Data.size()
+        );
+        decoded.resize(result.first);
 
-    // Convert to 16-bit samples
-    std::vector<short> audioSamples;
-    audioSamples.resize(decoded.size() / 2);
-    std::memcpy(audioSamples.data(), decoded.data(), decoded.size());
+        // Convert to 16-bit samples
+        std::vector<short> audioSamples;
+        audioSamples.resize(decoded.size() / 2);
+        std::memcpy(audioSamples.data(), decoded.data(), decoded.size());
 
-    // Add to playback buffer
-    {
-        std::lock_guard<std::mutex> lock(g_audioBuffer.mutex);
-        g_audioBuffer.chunks.push(std::move(audioSamples));
+        // Add to playback buffer with overflow protection
+        {
+            std::lock_guard<std::mutex> lock(g_audioBuffer.mutex);
+
+            // Prevent buffer overflow
+            if (g_audioBuffer.chunks.size() >= g_audioBuffer.max_buffer_chunks) {
+                // Drop oldest chunk to make room
+                if (!g_audioBuffer.chunks.empty()) {
+                    g_audioBuffer.chunks.pop();
+                }
+            }
+
+            g_audioBuffer.chunks.push(std::move(audioSamples));
+        }
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error handling audio chunk: " << e.what() << std::endl;
     }
 }
